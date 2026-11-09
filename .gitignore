@@ -1,0 +1,6 @@
+data/generated/
+*.db
+.env
+__pycache__/
+.venv/
+*.egg-info/
