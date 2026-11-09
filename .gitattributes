@@ -1,1 +1,4 @@
 * text=auto eol=lf
+
+# Supplier files are kept byte for byte (CRLF, latin-1, cp1252).
+data/samples/** -text
