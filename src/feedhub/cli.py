@@ -1,11 +1,26 @@
+import os
+from contextlib import closing
 from datetime import date, datetime
 from pathlib import Path
 
 import typer
 
-from feedhub import db, generator
+from feedhub import db, generator, mapping, pipeline
 
 app = typer.Typer(no_args_is_help=True)
+ENV_FILE = db.PROJECT_ROOT / ".env"
+
+
+def load_env_file(path):
+    if not path.exists():
+        return
+    for line in path.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        # A variable already set in the environment wins over the .env file.
+        os.environ.setdefault(key.strip(), value.strip())
 
 
 # Without a callback, Typer turns a single command into the root command
@@ -13,6 +28,7 @@ app = typer.Typer(no_args_is_help=True)
 @app.callback()
 def main():
     """Tyre supplier feeds: import and monitoring."""
+    load_env_file(ENV_FILE)
 
 
 @app.command()
@@ -58,6 +74,43 @@ def generate(
         note = f"  ({item['note']})" if item["note"] else ""
         typer.echo(f"{item['supplier']:<5} {item['day']}  {name:<24} {item['rows']:>4} rows{note}")
     typer.echo(f"{len(injections)} injected errors and scenarios, see {output / 'injections.csv'}")
+
+
+@app.command("import")
+def import_feeds(
+    supplier: list[str] = typer.Option(None, help="Supplier code. Can be repeated."),
+    all_suppliers: bool = typer.Option(False, "--all", help="Import every configured supplier."),
+    db_path: Path = typer.Option(db.DEFAULT_DB_PATH, "--db", help="Database file."),
+):
+    """Import the new files of the suppliers."""
+    known = mapping.supplier_codes()
+    codes = known if all_suppliers else [code.upper() for code in supplier or []]
+    if not codes:
+        raise typer.BadParameter("give --supplier CODE or --all", param_hint="--supplier")
+    for code in codes:
+        if code not in known:
+            raise typer.BadParameter(f"no config/suppliers/{code.lower()}.toml", param_hint="--supplier")
+
+    failed = False
+    with closing(db.connect(db_path)) as connection:
+        for code in codes:
+            supplier_mapping = mapping.load_mapping(code)
+            typer.echo(f"{code}: {pipeline.describe_source(supplier_mapping)}")
+            results = pipeline.import_supplier(connection, supplier_mapping)
+            if not results:
+                typer.echo("  no new file")
+            for run in results:
+                typer.echo(
+                    f"  {run['source_name'] or '-':<24} {run['status']:<8}"
+                    f" read {run['rows_read']:>4}  loaded {run['rows_loaded']:>4}"
+                    f"  rejected {run['rows_rejected']:>4}"
+                )
+                if run["error_message"]:
+                    typer.echo(f"    {run['error_message']}")
+                failed = failed or run["status"] == "failed"
+    # A non-zero exit code lets a scheduler or a monitoring tool see the failure.
+    if failed:
+        raise typer.Exit(code=1)
 
 
 if __name__ == "__main__":

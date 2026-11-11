@@ -1,0 +1,50 @@
+code = "REIF"
+name = "Reifen Handel GmbH"
+protocol = "rest_api"
+format = "json"
+
+[source]
+url_env = "REIF_API_URL"
+key_env = "REIF_API_KEY"
+key_header = "X-API-Key"
+exports_endpoint = "/api/v1/exports"
+items_endpoint = "/api/v1/exports/{date}/artikel"
+items_key = "artikel"
+per_page = 100
+# Name given to each downloaded export, also used for the local folder.
+file_name = "offers_{date}.json"
+# Used when REIF_API_URL is not set.
+local_dir = "data/generated/reif"
+file_pattern = "offers_*.json"
+
+[file]
+encoding = "utf-8"
+records = "artikel"
+
+[columns]
+ean = "EAN"
+brand = "Hersteller"
+model = "Modell"
+width = "Breite"
+aspect_ratio = "Querschnitt"
+rim_diameter = "Felge"
+load_index = "Lastindex"
+speed_index = "Geschwindigkeitsindex"
+season = "Saison"
+vehicle_type = "Fahrzeugtyp"
+noise_db = "Rollgeraeusch_dB"
+fuel_class = "Kraftstoffeffizienz"
+wet_grip_class = "Nasshaftung"
+price_eur = "Preis"
+stock = "Bestand"
+delivery_days = "Lieferzeit_Tage"
+
+[season_map]
+"Sommer" = "summer"
+"Winter" = "winter"
+"Ganzjahr" = "all_season"
+
+[vehicle_map]
+"PKW" = "car"
+"SUV" = "suv"
+"Transporter" = "van"

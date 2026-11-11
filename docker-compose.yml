@@ -1,0 +1,10 @@
+# Test SFTP server for the NORD supplier. Start with: docker compose up -d
+# Values come from the .env file (see .env.example).
+services:
+  sftp:
+    image: atmoz/sftp:alpine
+    ports:
+      - "${NORD_SFTP_PORT}:22"
+    volumes:
+      - ./data/generated/nord:/home/${NORD_SFTP_USER}/upload:ro
+    command: ${NORD_SFTP_USER}:${NORD_SFTP_PASSWORD}:1001

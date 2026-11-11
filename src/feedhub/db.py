@@ -1,10 +1,16 @@
 import sqlite3
 from contextlib import closing
+from datetime import datetime, timezone
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 SCHEMA_PATH = PROJECT_ROOT / "sql" / "schema.sql"
 DEFAULT_DB_PATH = PROJECT_ROOT / "data" / "feedhub.db"
+
+
+def now():
+    # Same format and time zone (UTC) as CURRENT_TIMESTAMP in SQLite.
+    return datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
 
 
 def connect(db_path=DEFAULT_DB_PATH):

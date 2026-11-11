@@ -1,0 +1,43 @@
+code = "EURO"
+name = "EuroTyre Wholesale"
+protocol = "file"
+format = "xml"
+
+[source]
+# The supplier drops one catalogue per day in this folder.
+local_dir = "data/generated/euro"
+file_pattern = "catalogue_*.xml"
+
+[file]
+records = "product"
+
+[columns]
+ean = "ean"
+brand = "brand"
+model = "model"
+width = "width"
+aspect_ratio = "profile"
+rim_diameter = "rim"
+load_index = "loadIndex"
+speed_index = "speedRating"
+season = "season"
+vehicle_type = "vehicle"
+noise_db = "noise"
+fuel_class = "fuelClass"
+wet_grip_class = "wetGrip"
+price_eur = "priceCents"
+stock = "stock"
+delivery_days = "leadTimeDays"
+
+[transforms]
+price_eur = "cents_to_eur"
+
+[season_map]
+"S" = "summer"
+"W" = "winter"
+"A" = "all_season"
+
+[vehicle_map]
+"PCR" = "car"
+"SUV" = "suv"
+"LCV" = "van"

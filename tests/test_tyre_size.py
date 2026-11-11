@@ -59,7 +59,7 @@ def test_format_size():
     assert format_size(205, 55, 16) == "205/55 R16"
 
 
-def test_every_generated_size_can_be_read_back():
+def test_every_fake_size_can_be_read_back():
     for product in generator.build_catalogue(random.Random(1)):
         expected = TyreSize(
             product["width"],

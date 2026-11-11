@@ -103,7 +103,7 @@ def test_unknown_field_is_refused():
     assert invalid_fields(colour="black") == {"colour"}
 
 
-def test_every_generated_offer_is_valid():
+def test_every_fake_offer_is_valid():
     rng, products, offers, listed = generator.initial_state(seed=1)
     for code in generator.SUPPLIERS:
         for row in generator.build_rows(products, offers[code], listed[code]):

@@ -1,0 +1,46 @@
+code = "NORD"
+name = "Pneus Nord Distribution"
+protocol = "sftp"
+format = "csv"
+
+[source]
+host_env = "NORD_SFTP_HOST"
+port_env = "NORD_SFTP_PORT"
+user_env = "NORD_SFTP_USER"
+password_env = "NORD_SFTP_PASSWORD"
+remote_dir = "/upload"
+# Used when NORD_SFTP_HOST is not set.
+local_dir = "data/generated/nord"
+file_pattern = "stock_*.csv"
+
+[file]
+encoding = "latin-1"
+delimiter = ";"
+
+[columns]
+ean = "EAN"
+brand = "Marque"
+model = "Modèle"
+size = "Dimension"
+season = "Saison"
+vehicle_type = "Catégorie"
+noise_db = "Bruit (dB)"
+fuel_class = "Classe énergie"
+wet_grip_class = "Adhérence sol mouillé"
+price_eur = "Prix HT"
+stock = "Stock"
+delivery_days = "Délai (jours)"
+
+[transforms]
+size = "size_combined"
+price_eur = "decimal_comma"
+
+[season_map]
+"Été" = "summer"
+"Hiver" = "winter"
+"4 saisons" = "all_season"
+
+[vehicle_map]
+"Tourisme" = "car"
+"SUV" = "suv"
+"Utilitaire" = "van"
