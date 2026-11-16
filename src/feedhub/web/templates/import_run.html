@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+{% from "_macros.html" import sql_block, status_badge, severity_badge %}
+{% block title %}Import {{ run.id }}{% endblock %}
+{% block content %}
+<h1>Import n° {{ run.id }} : {{ run.supplier }}</h1>
+<p class="intro">{{ run.supplier_name }} - {{ run.source_name or "aucun fichier" }}</p>
+
+<div class="counters">
+  <div><span class="label">Statut</span>{{ status_badge(run.status) }}</div>
+  <div><span class="label">Données du</span><span class="value">{{ run.feed_date or "-" }}</span></div>
+  <div><span class="label">Lignes lues</span><span class="value">{{ run.rows_read }}</span></div>
+  <div><span class="label">Chargées</span><span class="value">{{ run.rows_loaded }}</span></div>
+  <div><span class="label">Rejetées</span><span class="value">{{ run.rows_rejected }}</span></div>
+  <div><span class="label">Anomalies</span><span class="value">{{ anomalies|length }}</span></div>
+</div>
+<p class="muted">Début {{ run.started_at }} UTC, fin {{ run.finished_at or "-" }} UTC.</p>
+{% if run.error_message %}<p class="message error">{{ run.error_message }}</p>{% endif %}
+
+<h2>Anomalies et lignes rejetées</h2>
+<table>
+  <thead><tr><th>Règle</th><th>Gravité</th><th>EAN</th><th>Message</th><th>Ligne reçue</th></tr></thead>
+  <tbody>
+  {% for row in anomalies %}
+    <tr>
+      <td><code>{{ row.rule_code }}</code></td>
+      <td>{{ severity_badge(row.severity) }}</td>
+      <td>{{ row.ean or "" }}</td>
+      <td class="message-cell">{{ row.message }}</td>
+      <td class="details">{% if row.raw %}<code>{{ row.raw }}</code>{% endif %}</td>
+    </tr>
+  {% else %}
+    <tr><td colspan="5">Aucune anomalie pour cet import.</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+
+{{ sql_block(queries) }}
+{% endblock %}

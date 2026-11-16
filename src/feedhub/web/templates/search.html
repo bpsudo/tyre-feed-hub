@@ -1,0 +1,55 @@
+{% extends "base.html" %}
+{% from "_macros.html" import sql_block %}
+{% block title %}Recherche pneu{% endblock %}
+{% block content %}
+<h1>Recherche pneu</h1>
+
+<form class="filters" method="get" action="/search">
+  <label>Dimension
+    <input type="text" name="size" value="{{ size }}" placeholder="205/55 R16" autofocus>
+  </label>
+  <button type="submit">Chercher</button>
+</form>
+
+{% set seasons = {"summer": "été", "winter": "hiver", "all_season": "4 saisons"} %}
+{% if unreadable %}
+  <p class="message error">Dimension illisible : « {{ size }} ». Exemple : 205/55 R16.</p>
+{% elif parsed %}
+  <h2>{{ parsed }} : {{ offers|length }} offre(s) en stock</h2>
+  <table>
+    <thead>
+      <tr><th>Marque</th><th>Modèle</th><th>Indices</th><th>Saison</th><th>EAN</th><th>Fournisseur</th>
+          <th class="number">Prix HT</th><th class="number">Stock</th><th class="number">Délai</th></tr>
+    </thead>
+    <tbody>
+    {% for offer in offers %}
+      <tr>
+        <td>{{ offer.brand }}</td>
+        <td>{{ offer.model or "" }}</td>
+        <td>{{ offer.load_speed or "" }}</td>
+        <td>{{ seasons.get(offer.season, "") }}</td>
+        <td>{{ offer.ean }}</td>
+        <td>{{ offer.supplier }}</td>
+        <td class="number">{{ "%.2f"|format(offer.price_eur) }} €</td>
+        <td class="number">{{ offer.stock }}</td>
+        <td class="number">{% if offer.delivery_days is not none %}{{ offer.delivery_days }} j{% endif %}</td>
+      </tr>
+    {% else %}
+      <tr><td colspan="9">Aucune offre en stock dans cette dimension.</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+{% endif %}
+
+<h2>Dimensions les plus disponibles</h2>
+<ul class="sizes">
+  {% for row in top_sizes %}
+  <li>
+    <a href="/search?size={{ row.size|urlencode }}">{{ row.size }}</a>
+    <span class="muted">{{ row.total_stock }} pneus, {{ row.supplier_count }} fournisseur(s)</span>
+  </li>
+  {% endfor %}
+</ul>
+
+{{ sql_block(queries) }}
+{% endblock %}

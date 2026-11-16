@@ -176,5 +176,22 @@ def report(
     typer.echo(f"Rows: {len(rows)}")
 
 
+@app.command()
+def serve(
+    host: str = typer.Option("127.0.0.1", help="Use 0.0.0.0 to accept other machines."),
+    port: int = typer.Option(8000),
+    db_path: Path = typer.Option(db.DEFAULT_DB_PATH, "--db", help="Database file."),
+):
+    """Start the monitoring screen."""
+    import uvicorn
+
+    from feedhub.web.app import create_app
+
+    # Fails early with a clear message instead of an error page on every request.
+    open_database(db_path).close()
+    typer.echo(f"Monitoring screen: http://{'localhost' if host == '0.0.0.0' else host}:{port}")
+    uvicorn.run(create_app(db_path), host=host, port=port, log_level="warning")
+
+
 if __name__ == "__main__":
     app()

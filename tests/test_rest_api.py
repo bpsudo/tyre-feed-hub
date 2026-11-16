@@ -1,12 +1,9 @@
 import json
-import socket
-import threading
-import time
 from datetime import date
 
 import pytest
 import requests
-import uvicorn
+from conftest import free_port
 
 from feedhub import generator
 from feedhub.connectors import rest_api
@@ -18,12 +15,6 @@ from mock_supplier_api.app import create_app
 END_DATE = date(2026, 1, 20)
 
 
-def free_port():
-    with socket.socket() as sock:
-        sock.bind(("127.0.0.1", 0))
-        return sock.getsockname()[1]
-
-
 @pytest.fixture
 def feeds(tmp_path):
     generator.generate(tmp_path / "feeds", days=3, end_date=END_DATE)
@@ -31,26 +22,14 @@ def feeds(tmp_path):
 
 
 @pytest.fixture
-def start_api(feeds):
-    """Start the fake API in a thread and return its app and its URL."""
-    servers = []
-
+def start_api(feeds, start_server):
+    """Start the fake API and return its app and its URL."""
     def start(**options):
         options = {"api_key": "test-key", "retry_after": 0, **options}
         app = create_app(feeds, **options)
-        port = free_port()
-        server = uvicorn.Server(uvicorn.Config(app, host="127.0.0.1", port=port, log_level="warning"))
-        thread = threading.Thread(target=server.run, daemon=True)
-        thread.start()
-        servers.append((server, thread))
-        while not server.started:
-            time.sleep(0.02)
-        return app, f"http://127.0.0.1:{port}"
+        return app, start_server(app)
 
-    yield start
-    for server, thread in servers:
-        server.should_exit = True
-        thread.join()
+    return start
 
 
 @pytest.fixture

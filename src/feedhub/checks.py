@@ -177,9 +177,14 @@ ORDER BY s.code
 """
 
 
+def oldest_allowed_date(thresholds, checked_at):
+    """Data older than this day is stale. The file date has no time, so the whole day counts."""
+    return (checked_at - timedelta(hours=thresholds["feed_stale_hours"])).date()
+
+
 def check_stale_feeds(connection, thresholds, checked_at):
     """Record FEED_STALE once for each supplier whose newest data is too old. Return the new anomalies."""
-    oldest_allowed = (checked_at - timedelta(hours=thresholds["feed_stale_hours"])).date()
+    oldest_allowed = oldest_allowed_date(thresholds, checked_at)
     found = []
     for row in connection.execute(LAST_FEED_DATES).fetchall():
         last_feed = date.fromisoformat(row["last_feed"]) if row["last_feed"] else None

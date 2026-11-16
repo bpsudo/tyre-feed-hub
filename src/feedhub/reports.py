@@ -3,12 +3,15 @@ import re
 from feedhub.db import PROJECT_ROOT
 
 QUERIES_DIR = PROJECT_ROOT / "sql" / "queries"
+PAGES_DIR = PROJECT_ROOT / "sql" / "pages"
 
 
 class Query:
     def __init__(self, path):
         self.path = path
-        self.number = int(path.name.split("_", 1)[0])
+        prefix = path.name.split("_", 1)[0]
+        # Only the files of sql/queries are numbered.
+        self.number = int(prefix) if prefix.isdigit() else None
         self.sql = path.read_text(encoding="utf-8")
         # The first line of each file is the business question, as a comment.
         self.question = self.sql.splitlines()[0].removeprefix("--").strip()
@@ -30,8 +33,18 @@ class Query:
         return columns, [tuple(row) for row in cursor.fetchall()]
 
 
+    def fetch(self, connection, values):
+        """Run the query and return one dictionary per row."""
+        columns, rows = self.run(connection, values)
+        return [dict(zip(columns, row)) for row in rows]
+
+
 def all_queries(queries_dir=QUERIES_DIR):
     return [Query(path) for path in sorted(queries_dir.glob("[0-9][0-9]_*.sql"))]
+
+
+def page_query(name, pages_dir=PAGES_DIR):
+    return Query(pages_dir / f"{name}.sql")
 
 
 def find_query(number, queries_dir=QUERIES_DIR):

@@ -1,0 +1,21 @@
+{% macro sql_block(queries) %}
+<details class="sql">
+  <summary>Requête SQL utilisée</summary>
+  {% for query in queries %}
+    <pre><code>{{ query.sql }}</code></pre>
+    {% if query["values"] %}
+      <p class="values">Paramètres :
+        {% for name, value in query["values"].items() %}<code>:{{ name }} = {{ value if value is not none else "NULL" }}</code> {% endfor %}
+      </p>
+    {% endif %}
+  {% endfor %}
+</details>
+{% endmacro %}
+
+{% macro status_badge(status) %}
+<span class="badge {{ status or 'none' }}">{{ status_labels.get(status, "Aucun import") }}</span>
+{% endmacro %}
+
+{% macro severity_badge(severity) %}
+<span class="severity {{ severity }}">{{ severity }}</span>
+{% endmacro %}

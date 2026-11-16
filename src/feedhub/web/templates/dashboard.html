@@ -1,0 +1,75 @@
+{% extends "base.html" %}
+{% from "_macros.html" import sql_block, status_badge %}
+{% block title %}Tableau de bord{% endblock %}
+{% block content %}
+<h1>Tableau de bord</h1>
+<p class="intro">Dernier import de chaque fournisseur. Des données antérieures au {{ oldest_allowed }} sont en retard.</p>
+
+<table>
+  <thead>
+    <tr>
+      <th></th><th>Fournisseur</th><th>Source</th><th>Dernier import</th><th>Statut</th>
+      <th>Données du</th><th class="number">Lues</th><th class="number">Rejetées</th>
+      <th class="number">Critiques</th><th class="number">Offres</th>
+    </tr>
+  </thead>
+  <tbody>
+  {% for row in suppliers %}
+    <tr>
+      <td><span class="light {{ row.colour }}" title="{{ row.colour }}"></span></td>
+      <td><strong>{{ row.code }}</strong><br><span class="muted">{{ row.name }}</span></td>
+      <td>{{ row.protocol }} / {{ row.format }}</td>
+      <td>
+        {% if row.run_id %}
+          <a href="/imports/{{ row.run_id }}">{{ row.started_at }} UTC</a>
+          <br><span class="muted">{{ row.source_name or "pas de fichier" }}</span>
+        {% else %}-{% endif %}
+      </td>
+      <td>
+        {{ status_badge(row.status) }}
+        {% if row.error_message %}<br><span class="muted">{{ row.error_message }}</span>{% endif %}
+      </td>
+      <td>{{ row.newest_data or "-" }}{% if row.is_stale %}<br><span class="late">en retard</span>{% endif %}</td>
+      <td class="number">{{ row.rows_read if row.run_id else "" }}</td>
+      <td class="number">{{ row.rows_rejected if row.run_id else "" }}</td>
+      <td class="number">
+        {% if row.critical_count %}
+          <a class="critical-count" href="/anomalies?supplier={{ row.code }}&amp;severity=critical">{{ row.critical_count }}</a>
+        {% else %}0{% endif %}
+      </td>
+      <td class="number">{{ row.offer_count }}</td>
+    </tr>
+  {% else %}
+    <tr><td colspan="10">Aucun fournisseur. Lancez <code>feedhub import --all</code>.</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+<p class="legend">
+  <span class="light green"></span> import complet
+  <span class="light orange"></span> lignes rejetées
+  <span class="light red"></span> échec, anomalie critique ou données en retard
+</p>
+
+<h2>Historique des imports</h2>
+<table>
+  <thead>
+    <tr><th>N°</th><th>Fournisseur</th><th>Fichier</th><th>Statut</th>
+        <th class="number">Lues</th><th class="number">Rejetées</th><th class="number">Taux de rejet</th></tr>
+  </thead>
+  <tbody>
+  {% for run in history %}
+    <tr>
+      <td><a href="/imports/{{ run.run_id }}">{{ run.run_id }}</a></td>
+      <td>{{ run.supplier }}</td>
+      <td>{{ run.source_name or "-" }}</td>
+      <td>{{ status_badge(run.status) }}</td>
+      <td class="number">{{ run.rows_read }}</td>
+      <td class="number">{{ run.rows_rejected }}</td>
+      <td class="number">{% if run.reject_pct is not none %}{{ run.reject_pct }} %{% endif %}</td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+
+{{ sql_block(queries) }}
+{% endblock %}

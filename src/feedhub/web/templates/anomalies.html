@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+{% from "_macros.html" import sql_block, severity_badge %}
+{% block title %}Anomalies{% endblock %}
+{% block content %}
+<h1>Anomalies</h1>
+
+{% set labels = {"supplier": "Fournisseur", "rule_code": "Règle", "severity": "Gravité", "data_date": "Date des données"} %}
+<form class="filters" method="get" action="/anomalies">
+  {% for name in ["supplier", "rule_code", "severity", "data_date"] %}
+  <label>{{ labels[name] }}
+    <select name="{{ name }}">
+      <option value="">Tous</option>
+      {% for option in options[name] %}
+      <option value="{{ option }}" {% if values[name] == option %}selected{% endif %}>{{ option }}</option>
+      {% endfor %}
+    </select>
+  </label>
+  {% endfor %}
+  <button type="submit">Filtrer</button>
+  <a href="/anomalies">Effacer</a>
+</form>
+
+<p class="muted">{{ rows|length }} anomalie(s){% if rows|length == 500 %}, les 500 plus récentes{% endif %}.</p>
+
+<table>
+  <thead>
+    <tr><th>Données du</th><th>Fournisseur</th><th>Import</th><th>Règle</th><th>Gravité</th><th>EAN</th><th>Détail</th></tr>
+  </thead>
+  <tbody>
+  {% for row in rows %}
+    <tr>
+      <td class="nowrap">{{ row.data_date }}</td>
+      <td>{{ row.supplier }}</td>
+      <td>{% if row.run_id %}<a href="/imports/{{ row.run_id }}">{{ row.source_name or row.run_id }}</a>{% else %}-{% endif %}</td>
+      <td><code>{{ row.rule_code }}</code></td>
+      <td>{{ severity_badge(row.severity) }}</td>
+      <td>{{ row.ean or "" }}</td>
+      <td class="details">{{ row.details }}</td>
+    </tr>
+  {% else %}
+    <tr><td colspan="7">Aucune anomalie pour ces filtres.</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+
+{{ sql_block(queries) }}
+{% endblock %}
