@@ -5,7 +5,8 @@ from pathlib import Path
 
 import typer
 
-from feedhub import checks, db, generator, mapping, pipeline
+from feedhub import checks, db, generator, mapping, pipeline, reports
+from feedhub.tyre_size import parse_size
 
 app = typer.Typer(no_args_is_help=True)
 ENV_FILE = db.PROJECT_ROOT / ".env"
@@ -132,6 +133,47 @@ def import_feeds(
     # A non-zero exit code lets a scheduler or a monitoring tool see the failure.
     if failed:
         raise typer.Exit(code=1)
+
+
+@app.command()
+def report(
+    number: int = typer.Argument(None, help="Query number. Without it, the list of queries."),
+    supplier: str = typer.Option(None, help="Supplier code, for the queries that need one."),
+    size: str = typer.Option(None, help='Tyre size, for example "205/55 R16".'),
+    show_sql: bool = typer.Option(False, "--sql", help="Print the SQL before the result."),
+    db_path: Path = typer.Option(db.DEFAULT_DB_PATH, "--db", help="Database file."),
+):
+    """Run one of the analysis queries of sql/queries."""
+    if number is None:
+        for query in reports.all_queries():
+            needs = ", ".join(query.parameters)
+            typer.echo(f"{query.number:>2}  {query.question}" + (f"  [{needs}]" if needs else ""))
+        return
+    query = reports.find_query(number)
+    if query is None:
+        raise typer.BadParameter(f"no query number {number}, see 'feedhub report'", param_hint="NUMBER")
+
+    values = {"supplier": supplier.upper() if supplier else None}
+    if size:
+        parsed = parse_size(size)
+        if parsed is None:
+            raise typer.BadParameter(f"unreadable size: {size}", param_hint="--size")
+        values.update(width=parsed.width, aspect_ratio=parsed.aspect_ratio, rim_diameter=parsed.rim_diameter)
+    for name in query.parameters:
+        if values.get(name) is None and name not in query.optional_parameters:
+            option = "--size" if name in ("width", "aspect_ratio", "rim_diameter") else f"--{name}"
+            raise typer.BadParameter(f"query {number} needs {option}", param_hint=option)
+
+    with closing(open_database(db_path)) as connection:
+        columns, rows = query.run(connection, values)
+    typer.echo(query.question)
+    if show_sql:
+        typer.echo("")
+        typer.echo(query.sql)
+    typer.echo("")
+    typer.echo(reports.format_table(columns, rows))
+    typer.echo("")
+    typer.echo(f"Rows: {len(rows)}")
 
 
 if __name__ == "__main__":
