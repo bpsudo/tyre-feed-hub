@@ -29,3 +29,5 @@ where = ["src"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# The fake supplier API sits at the project root, outside src.
+pythonpath = ["."]
