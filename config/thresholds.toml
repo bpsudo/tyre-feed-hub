@@ -1,0 +1,21 @@
+# Thresholds of the import checks. A share of 0.30 means 30 %.
+
+# More rejected rows than this share of the file: REJECT_RATE_HIGH.
+reject_rate_max = 0.05
+
+# Fewer rows than the previous import, by more than this share: ROW_COUNT_DROP.
+row_count_drop_max = 0.30
+
+# Total stock lower than at the previous import, by more than this share: STOCK_DROP.
+stock_drop_max = 0.50
+
+# Price of an EAN changed by more than this share since the previous import: PRICE_JUMP.
+price_jump_max = 0.30
+
+# Price further than this share from the median price of the EAN: PRICE_OUTLIER.
+# The median uses every supplier that has the EAN, and needs at least 3 of them.
+price_outlier_max = 0.40
+price_outlier_min_suppliers = 3
+
+# No successful import with data newer than this: FEED_STALE.
+feed_stale_hours = 24

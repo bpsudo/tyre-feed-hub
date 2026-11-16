@@ -1,11 +1,11 @@
 import os
 from contextlib import closing
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 from pathlib import Path
 
 import typer
 
-from feedhub import db, generator, mapping, pipeline
+from feedhub import checks, db, generator, mapping, pipeline
 
 app = typer.Typer(no_args_is_help=True)
 ENV_FILE = db.PROJECT_ROOT / ".env"
@@ -21,6 +21,24 @@ def load_env_file(path):
         key, value = line.split("=", 1)
         # A variable already set in the environment wins over the .env file.
         os.environ.setdefault(key.strip(), value.strip())
+
+
+def open_database(db_path):
+    try:
+        return db.open_db(db_path)
+    except db.DatabaseNotReady as error:
+        typer.echo(f"Error: {error}", err=True)
+        raise typer.Exit(code=1)
+
+
+def print_run(run):
+    typer.echo(
+        f"  {run['source_name'] or '-':<24} {run['status']:<8}"
+        f" read {run['rows_read']:>4}  loaded {run['rows_loaded']:>4}"
+        f"  rejected {run['rows_rejected']:>4}"
+    )
+    if run["error_message"]:
+        typer.echo(f"    {run['error_message']}")
 
 
 # Without a callback, Typer turns a single command into the root command
@@ -91,23 +109,26 @@ def import_feeds(
         if code not in known:
             raise typer.BadParameter(f"no config/suppliers/{code.lower()}.toml", param_hint="--supplier")
 
-    failed = False
-    with closing(db.connect(db_path)) as connection:
-        for code in codes:
-            supplier_mapping = mapping.load_mapping(code)
-            typer.echo(f"{code}: {pipeline.describe_source(supplier_mapping)}")
-            results = pipeline.import_supplier(connection, supplier_mapping)
-            if not results:
+    mappings = [mapping.load_mapping(code) for code in codes]
+    thresholds = checks.load_thresholds()
+    with closing(open_database(db_path)) as connection:
+        results = pipeline.import_suppliers(connection, mappings, thresholds)
+        for supplier_mapping in mappings:
+            runs = results[supplier_mapping["code"]]
+            typer.echo(f"{supplier_mapping['code']}: {pipeline.describe_source(supplier_mapping)}")
+            if not runs:
                 typer.echo("  no new file")
-            for run in results:
-                typer.echo(
-                    f"  {run['source_name'] or '-':<24} {run['status']:<8}"
-                    f" read {run['rows_read']:>4}  loaded {run['rows_loaded']:>4}"
-                    f"  rejected {run['rows_rejected']:>4}"
-                )
-                if run["error_message"]:
-                    typer.echo(f"    {run['error_message']}")
-                failed = failed or run["status"] == "failed"
+            for run in runs:
+                print_run(run)
+        stale = checks.check_stale_feeds(connection, thresholds, datetime.now(timezone.utc))
+        for code, details in stale:
+            typer.echo(f"FEED_STALE {code}: {details}")
+        anomalies = connection.execute(
+            "SELECT severity, COUNT(*) FROM anomalies GROUP BY severity ORDER BY severity"
+        ).fetchall()
+        typer.echo("Anomalies in the database: " + ", ".join(f"{n} {sev}" for sev, n in anomalies))
+
+    failed = any(run["status"] == "failed" for runs in results.values() for run in runs)
     # A non-zero exit code lets a scheduler or a monitoring tool see the failure.
     if failed:
         raise typer.Exit(code=1)

@@ -1,8 +1,11 @@
 import json
+import re
+from datetime import date
 
 from pydantic import ValidationError
 
-from feedhub.checks import REJECT_SEVERITY, row_rejection
+from feedhub import checks
+from feedhub.checks import REJECT_SEVERITY, readable_text, row_rejection
 from feedhub.connectors import local_file, rest_api, sftp
 from feedhub.db import now
 from feedhub.mapping import MappingError, map_row
@@ -87,10 +90,21 @@ def imported_files(connection, supplier_id):
     return {row["source_name"] for row in rows}
 
 
+def feed_date(source_name):
+    """Date written in a file name such as stock_20260120.csv, or None."""
+    match = re.search(r"(\d{4})-?(\d{2})-?(\d{2})", source_name or "")
+    if match is None:
+        return None
+    try:
+        return date(*map(int, match.groups())).isoformat()
+    except ValueError:
+        return None
+
+
 def start_run(connection, supplier_id, source_name, started_at):
     cursor = connection.execute(
-        "INSERT INTO import_runs (supplier_id, started_at, source_name) VALUES (?, ?, ?)",
-        (supplier_id, started_at, source_name),
+        "INSERT INTO import_runs (supplier_id, started_at, source_name, feed_date) VALUES (?, ?, ?, ?)",
+        (supplier_id, started_at, source_name, feed_date(source_name)),
     )
     connection.commit()
     return cursor.lastrowid
@@ -134,7 +148,7 @@ def validate_rows(raw_rows, mapping):
     return list(offers.values()), anomalies, rejected
 
 
-def load_offers(connection, run_id, supplier_id, offers, loaded_at):
+def load_offers(connection, run_id, supplier_id, offers, loaded_at, delete_missing=True):
     connection.executemany(
         SAVE_PRODUCT, [[getattr(offer, field) for field in PRODUCT_FIELDS] for offer in offers]
     )
@@ -145,7 +159,8 @@ def load_offers(connection, run_id, supplier_id, offers, loaded_at):
     connection.executemany(
         SAVE_SNAPSHOT, [(run_id, supplier_id, o.ean, o.price_eur, o.stock) for o in offers]
     )
-    connection.execute(DELETE_MISSING_OFFERS, (supplier_id, run_id))
+    if delete_missing:
+        connection.execute(DELETE_MISSING_OFFERS, (supplier_id, run_id))
 
 
 def save_anomalies(connection, run_id, supplier_id, anomalies):
@@ -154,25 +169,33 @@ def save_anomalies(connection, run_id, supplier_id, anomalies):
         INSERT INTO anomalies (run_id, supplier_id, ean, rule_code, severity, details)
         VALUES (?, ?, ?, ?, ?, ?)
         """,
-        [(run_id, supplier_id, *anomaly) for anomaly in anomalies],
+        [(run_id, supplier_id, ean, rule, severity, readable_text(details))
+         for ean, rule, severity, details in anomalies],
     )
 
 
-def import_file(connection, supplier_id, mapping, name, content):
+def import_file(connection, supplier_id, mapping, name, content, thresholds):
     started_at = now()
     run_id = start_run(connection, supplier_id, name, started_at)
     try:
         raw_rows = read_file(content, mapping)
         offers, anomalies, rejected = validate_rows(raw_rows, mapping)
+        previous = checks.previous_run(connection, supplier_id, run_id)
+        anomalies += checks.check_reject_rate(len(raw_rows), rejected, thresholds)
+        row_count_drop = checks.check_row_count(len(raw_rows), previous, thresholds)
+        anomalies += row_count_drop
         with connection:
-            save_anomalies(connection, run_id, supplier_id, anomalies)
             if offers:
-                load_offers(connection, run_id, supplier_id, offers, started_at)
+                # A cut file must not delete the offers it is missing.
+                load_offers(connection, run_id, supplier_id, offers, started_at,
+                            delete_missing=not row_count_drop)
+                anomalies += checks.check_loaded_run(connection, run_id, previous, thresholds)
                 status = "success" if rejected == 0 else "partial"
                 finish_run(connection, run_id, status, len(raw_rows), len(offers), rejected)
             else:
                 # Loading nothing would delete every offer of the supplier.
                 finish_run(connection, run_id, "failed", len(raw_rows), 0, rejected, "no valid row")
+            save_anomalies(connection, run_id, supplier_id, anomalies)
     # One unreadable file must not stop the import of the next ones.
     except Exception as error:
         finish_run(connection, run_id, "failed", error_message=f"{type(error).__name__}: {error}")
@@ -180,8 +203,9 @@ def import_file(connection, supplier_id, mapping, name, content):
     return run_result(connection, run_id)
 
 
-def import_supplier(connection, mapping):
+def import_supplier(connection, mapping, thresholds=None):
     """Import every new file of a supplier. Return one result per import run."""
+    thresholds = thresholds or checks.load_thresholds()
     supplier_id = save_supplier(connection, mapping)
     skip_names = imported_files(connection, supplier_id)
     try:
@@ -192,4 +216,28 @@ def import_supplier(connection, mapping):
         finish_run(connection, run_id, "failed", error_message=f"{type(error).__name__}: {error}")
         connection.commit()
         return [run_result(connection, run_id)]
-    return [import_file(connection, supplier_id, mapping, name, content) for name, content in files]
+    return [import_file(connection, supplier_id, mapping, name, content, thresholds)
+            for name, content in files]
+
+
+def check_outliers(connection, results, thresholds=None):
+    """Compare the prices of the newest loaded run with the other suppliers. Return the anomaly count."""
+    thresholds = thresholds or checks.load_thresholds()
+    loaded = [run for run in results if run["status"] in ("success", "partial")]
+    if not loaded:
+        return 0
+    run = loaded[-1]
+    anomalies = checks.check_price_outliers(connection, run["id"], thresholds)
+    with connection:
+        save_anomalies(connection, run["id"], run["supplier_id"], anomalies)
+    return len(anomalies)
+
+
+def import_suppliers(connection, mappings, thresholds=None):
+    """Import several suppliers, then run the checks that compare suppliers with each other."""
+    thresholds = thresholds or checks.load_thresholds()
+    results = {mapping["code"]: import_supplier(connection, mapping, thresholds) for mapping in mappings}
+    # Done after every import, so that the first supplier also has other prices to compare with.
+    for runs in results.values():
+        check_outliers(connection, runs, thresholds)
+    return results

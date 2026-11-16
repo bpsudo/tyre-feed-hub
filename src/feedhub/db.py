@@ -26,3 +26,24 @@ def init_db(db_path=DEFAULT_DB_PATH):
     schema = SCHEMA_PATH.read_text(encoding="utf-8")
     with closing(connect(db_path)) as connection:
         connection.executescript(schema)
+
+
+TABLES = {"suppliers", "products", "offers", "import_runs", "offer_snapshots", "anomalies"}
+
+
+class DatabaseNotReady(Exception):
+    pass
+
+
+def open_db(db_path=DEFAULT_DB_PATH):
+    """Connect to a database already made by init-db, or raise DatabaseNotReady."""
+    message = f"database not initialized: {db_path}. Run 'feedhub init-db' first."
+    # sqlite3.connect would create an empty file without any table.
+    if not Path(db_path).exists():
+        raise DatabaseNotReady(message)
+    connection = connect(db_path)
+    rows = connection.execute("SELECT name FROM sqlite_master WHERE type = 'table'")
+    if not TABLES <= {row["name"] for row in rows}:
+        connection.close()
+        raise DatabaseNotReady(message)
+    return connection

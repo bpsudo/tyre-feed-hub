@@ -42,6 +42,8 @@ CREATE TABLE IF NOT EXISTS import_runs (
     -- NULL while the import is still running.
     status TEXT CHECK (status IN ('success', 'partial', 'failed')),
     source_name TEXT,
+    -- Date of the data, read from the file name. Can differ from the import date.
+    feed_date DATE,
     rows_read INTEGER NOT NULL DEFAULT 0,
     rows_loaded INTEGER NOT NULL DEFAULT 0,
     rows_rejected INTEGER NOT NULL DEFAULT 0,
@@ -66,7 +68,7 @@ CREATE TABLE IF NOT EXISTS anomalies (
     ean TEXT,
     rule_code TEXT NOT NULL,
     severity TEXT NOT NULL CHECK (severity IN ('info', 'warning', 'critical')),
-    details TEXT,
+    details TEXT CHECK (details IS NULL OR typeof(details) = 'text'),
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 

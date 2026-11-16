@@ -97,7 +97,8 @@ def test_each_injected_error_gives_one_anomaly(connection, tmp_path, code):
         injected = Counter(
             RULE_FOR_ERROR[row["error"]] for row in csv.DictReader(file) if row["supplier"] == code
         )
-    found = Counter(row[0] for row in connection.execute("SELECT rule_code FROM anomalies"))
+    rules = connection.execute("SELECT rule_code FROM anomalies")
+    found = Counter(row[0] for row in rules if row[0] in RULE_FOR_ERROR.values())
     assert found == injected
     assert all(run["status"] == "partial" for run in results)
     assert sum(run["rows_rejected"] for run in results) == sum(injected.values()) - injected["DUPLICATE_IN_FILE"]
@@ -110,8 +111,13 @@ def test_truncated_file(connection, tmp_path):
 
     last_run = results[-1]
     assert last_run["rows_loaded"] < results[-2]["rows_loaded"] * 0.5
-    assert count(connection, "SELECT COUNT(*) FROM offers") == last_run["rows_loaded"]
+    # The offers missing from the cut file are kept.
+    assert count(connection, "SELECT COUNT(*) FROM offers") >= results[-2]["rows_loaded"]
     assert count(connection, "SELECT COUNT(*) FROM anomalies WHERE rule_code = 'MISSING_FIELD'") == 1
+    rules = {row[0] for row in connection.execute(
+        "SELECT rule_code FROM anomalies WHERE run_id = ? AND severity = 'critical'", (last_run["id"],)
+    )}
+    assert rules == {"ROW_COUNT_DROP", "STOCK_DROP"}
 
 
 def test_cut_xml_file_fails(connection, tmp_path):

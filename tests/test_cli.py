@@ -37,3 +37,24 @@ def test_unknown_scenario_is_refused(tmp_path):
     )
 
     assert result.exit_code != 0
+
+
+def test_import_without_database_gives_a_clear_message(tmp_path):
+    db_path = tmp_path / "missing.db"
+
+    result = runner.invoke(app, ["import", "--all", "--db", str(db_path)])
+
+    assert result.exit_code == 1
+    assert "Run 'feedhub init-db' first" in result.output
+    assert result.exception is None or isinstance(result.exception, SystemExit)
+    assert not db_path.exists()
+
+
+def test_empty_database_file_gives_the_same_message(tmp_path):
+    db_path = tmp_path / "empty.db"
+    db_path.write_bytes(b"")
+
+    result = runner.invoke(app, ["import", "--all", "--db", str(db_path)])
+
+    assert result.exit_code == 1
+    assert "database not initialized" in result.output
