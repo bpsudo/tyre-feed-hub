@@ -1,3 +1,7 @@
+import base64
+import binascii
+import re
+import xml.etree.ElementTree as ET
 from contextlib import closing
 from datetime import datetime, timezone
 from pathlib import Path
@@ -8,12 +12,15 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
-from feedhub import checks, db, reports
+from feedhub import checks, db, onboarding, reports
+from feedhub.mapping import CONFIG_DIR, supplier_codes
 from feedhub.tyre_size import format_size, parse_size
 
 WEB_DIR = Path(__file__).resolve().parent
 SEVERITIES = ["critical", "warning", "info"]
 STATUS_LABELS = {"success": "OK", "partial": "Partiel", "failed": "Échec"}
+# The file goes back and forth in a hidden form field, which the form parser limits to 1 MB.
+MAX_SAMPLE_BYTES = 500_000
 
 
 def status_colour(row):
@@ -35,15 +42,40 @@ def blank_to_none(value):
     return value.strip() or None
 
 
-def create_app(db_path=db.DEFAULT_DB_PATH, thresholds=None):
+def supplier_form_errors(code, name, existing_codes):
+    errors = []
+    if not re.fullmatch(r"[A-Z][A-Z0-9]{1,9}", code):
+        errors.append("Le code doit faire 2 à 10 caractères, lettres majuscules et chiffres, "
+                      "en commençant par une lettre.")
+    elif code in existing_codes:
+        errors.append(f"Le code {code} est déjà utilisé.")
+    if not name:
+        errors.append("Le nom du fournisseur est obligatoire.")
+    return errors
+
+
+def known_brands(db_path):
+    """Brands of the catalogue, with the query used. Empty when the database is not ready."""
+    query = reports.page_query("known_brands")
+    try:
+        with closing(db.open_db(db_path)) as connection:
+            return [row["brand"] for row in query.fetch(connection, {})], query
+    except db.DatabaseNotReady:
+        return [], query
+
+
+def create_app(db_path=db.DEFAULT_DB_PATH, thresholds=None, demo=False,
+               config_dir=CONFIG_DIR, docs_dir=onboarding.DOCS_DIR):
+    """demo=True: the new supplier page shows the files it would write, without writing them."""
     thresholds = thresholds or checks.load_thresholds()
     app = FastAPI(title="Tyre Feed Hub", docs_url=None, redoc_url=None)
     app.mount("/static", StaticFiles(directory=WEB_DIR / "static"), name="static")
     templates = Jinja2Templates(directory=WEB_DIR / "templates")
     templates.env.globals["status_labels"] = STATUS_LABELS
+    templates.env.globals["demo"] = demo
 
-    def render(request, name, **context):
-        return templates.TemplateResponse(request, name, context)
+    def render(request, template, **context):
+        return templates.TemplateResponse(request, template, context)
 
     @app.exception_handler(db.DatabaseNotReady)
     def database_not_ready(request, error):
@@ -139,6 +171,82 @@ def create_app(db_path=db.DEFAULT_DB_PATH, thresholds=None):
             offers=offers,
             top_sizes=top_sizes,
             queries=[shown_query(search_query, values), shown_query(top_query, {})],
+        )
+
+    @app.get("/nouveau-fournisseur", response_class=HTMLResponse)
+    def new_supplier_form(request: Request):
+        return render(request, "new_supplier.html", analysis=None, errors=[], code="", name="")
+
+    @app.post("/nouveau-fournisseur", response_class=HTMLResponse)
+    async def new_supplier(request: Request):
+        form = await request.form()
+        code = str(form.get("code", "")).strip().upper()
+        name = str(form.get("name", "")).strip()
+        upload = form.get("file")
+        if upload is not None and getattr(upload, "filename", ""):
+            content = await upload.read(MAX_SAMPLE_BYTES + 1)
+            file_name = upload.filename
+        else:
+            try:
+                content = base64.b64decode(str(form.get("content", "")), validate=True)
+            except binascii.Error:
+                content = b""
+            file_name = str(form.get("file_name", ""))
+
+        def start_again(message):
+            return render(request, "new_supplier.html", analysis=None, errors=[message], code=code, name=name)
+
+        if not content:
+            return start_again("Choisissez un fichier d'exemple (CSV, XML ou JSON).")
+        if len(content) > MAX_SAMPLE_BYTES:
+            return start_again("Le fichier d'exemple est limité à 500 Ko : quelques centaines de lignes suffisent.")
+
+        brands, brands_query = known_brands(db_path)
+        try:
+            analysis = onboarding.analyze(content, file_name, brands)
+        except (ValueError, ET.ParseError, UnicodeDecodeError) as error:
+            return start_again(f"Fichier illisible : {error}")
+
+        # First visit: the proposal. After that: the columns chosen in the form.
+        if "column_ean" in form:
+            columns = {field: str(form.get(f"column_{field}", "")) for field in onboarding.FIELDS}
+            transforms = {field: str(form.get(f"transform_{field}", "")) for field in ("size", "price_eur")}
+        else:
+            columns = analysis["proposal"]
+            transforms = None
+        mapping = onboarding.build_mapping(analysis, code or "NEW", name or "Nouveau fournisseur",
+                                           columns, transforms)
+        errors = supplier_form_errors(code, name, supplier_codes(config_dir))
+        missing = onboarding.missing_fields(mapping["columns"])
+        if missing:
+            labels = ", ".join(onboarding.FIELD_LABELS[field] for field in missing)
+            errors.append(f"Champs obligatoires sans colonne : {labels}.")
+
+        saved = None
+        if form.get("action") == "save" and not errors and not demo:
+            try:
+                saved = onboarding.save_supplier_files(mapping, config_dir, docs_dir)
+            except FileExistsError as error:
+                errors.append(str(error))
+
+        return render(
+            request, "new_supplier.html",
+            analysis=analysis,
+            code=code,
+            name=name,
+            mapping=mapping,
+            columns=mapping["columns"],
+            transforms=mapping.get("transforms", {}),
+            fields=onboarding.FIELD_LABELS,
+            unknown_values=onboarding.value_maps(analysis, mapping["columns"])[1],
+            result=onboarding.dry_run(content, mapping),
+            toml=onboarding.mapping_to_toml(mapping),
+            doc=onboarding.supplier_doc(mapping),
+            content=base64.b64encode(content).decode("ascii"),
+            errors=errors,
+            save_requested=form.get("action") == "save",
+            saved=saved,
+            queries=[shown_query(brands_query, {})],
         )
 
     return app

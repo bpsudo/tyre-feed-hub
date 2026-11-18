@@ -180,6 +180,7 @@ def report(
 def serve(
     host: str = typer.Option("127.0.0.1", help="Use 0.0.0.0 to accept other machines."),
     port: int = typer.Option(8000),
+    demo: bool = typer.Option(False, "--demo", help="The new supplier page writes no file."),
     db_path: Path = typer.Option(db.DEFAULT_DB_PATH, "--db", help="Database file."),
 ):
     """Start the monitoring screen."""
@@ -190,7 +191,7 @@ def serve(
     # Fails early with a clear message instead of an error page on every request.
     open_database(db_path).close()
     typer.echo(f"Monitoring screen: http://{'localhost' if host == '0.0.0.0' else host}:{port}")
-    uvicorn.run(create_app(db_path), host=host, port=port, log_level="warning")
+    uvicorn.run(create_app(db_path, demo=demo), host=host, port=port, log_level="warning")
 
 
 if __name__ == "__main__":

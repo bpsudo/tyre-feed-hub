@@ -1,0 +1,135 @@
+{% extends "base.html" %}
+{% from "_macros.html" import sql_block %}
+{% block title %}Nouveau fournisseur{% endblock %}
+{% block content %}
+<h1>Nouveau fournisseur</h1>
+<p class="intro">
+  Déposez un fichier d'exemple du fournisseur. La page reconnaît le format et propose une correspondance
+  des colonnes, que vous pouvez corriger avant d'enregistrer le fichier de mapping.
+</p>
+{% if demo %}
+<p class="message info">Mode démonstration : rien n'est enregistré sur ce serveur, la page montre les fichiers qu'elle aurait créés.</p>
+{% endif %}
+
+{% for error in errors %}<p class="message error">{{ error }}</p>{% endfor %}
+
+{% if saved %}
+<div class="message success">
+  <p>Fournisseur enregistré. Fichiers créés :</p>
+  <ul>{% for path in saved %}<li><code>{{ path }}</code></li>{% endfor %}</ul>
+  <p>Déposez ses fichiers dans <code>{{ mapping.source.local_dir }}</code>, puis lancez
+     <code>feedhub import --supplier {{ mapping.code }}</code>.</p>
+</div>
+{% endif %}
+
+{% if not analysis %}
+<form class="steps" method="post" action="/nouveau-fournisseur" enctype="multipart/form-data">
+  <label>Code fournisseur <input type="text" name="code" value="{{ code }}" placeholder="SUD" maxlength="10"></label>
+  <label>Nom <input type="text" name="name" value="{{ name }}" placeholder="Pneus Sud Import"></label>
+  <label>Fichier d'exemple (CSV, XML ou JSON, 500 Ko au plus) <input type="file" name="file" accept=".csv,.txt,.xml,.json"></label>
+  <button type="submit">Analyser le fichier</button>
+</form>
+{% else %}
+
+<h2>1. Fichier reconnu</h2>
+<ul class="facts">
+  <li>Fichier : <code>{{ analysis.file_name }}</code>, {{ analysis.row_count }} lignes</li>
+  <li>Format : <strong>{{ analysis.format|upper }}</strong></li>
+  {% if analysis.file.encoding %}<li>Encodage : <strong>{{ analysis.file.encoding }}</strong></li>{% endif %}
+  {% if analysis.file.delimiter %}<li>Séparateur : <code>{{ analysis.file.delimiter }}</code></li>{% endif %}
+  {% if analysis.file.records %}<li>Enregistrements : <code>{{ analysis.file.records }}</code></li>{% endif %}
+  <li>Fichiers attendus : <code>{{ mapping.source.file_pattern }}</code></li>
+</ul>
+
+<form method="post" action="/nouveau-fournisseur">
+  <input type="hidden" name="content" value="{{ content }}">
+  <input type="hidden" name="file_name" value="{{ analysis.file_name }}">
+
+  <div class="steps">
+    <label>Code fournisseur <input type="text" name="code" value="{{ code }}" maxlength="10"></label>
+    <label>Nom <input type="text" name="name" value="{{ name }}"></label>
+  </div>
+
+  <h2>2. Correspondance des colonnes</h2>
+  <p class="muted">La confiance vient surtout des valeurs de la colonne (EAN valides, dimensions lisibles, prix plausibles...), avec un bonus quand le nom de la colonne est connu.</p>
+  <table>
+    <thead><tr><th>Champ</th><th>Colonne du fichier</th><th class="number">Confiance</th><th>Exemples de valeurs</th><th>Transformation</th></tr></thead>
+    <tbody>
+    {% for field, label in fields.items() %}
+      {% set chosen = columns.get(field, "") %}
+      <tr {% if chosen %}class="mapped"{% endif %}>
+        <td>{{ label }}</td>
+        <td>
+          <select name="column_{{ field }}">
+            <option value="">-</option>
+            {% for column in analysis.columns %}
+            <option value="{{ column }}" {% if column == chosen %}selected{% endif %}>{{ column }} ({{ (analysis.scores[column][field] * 100)|round|int }} %)</option>
+            {% endfor %}
+          </select>
+        </td>
+        <td class="number">{% if chosen %}{{ (analysis.scores[chosen][field] * 100)|round|int }} %{% endif %}</td>
+        <td class="details">{% if chosen %}{{ analysis["values"][chosen][:3]|join(" | ") }}{% endif %}</td>
+        <td>
+          {% if field == "size" %}
+          <select name="transform_size">
+            {% for value, text in [("size_combined", "dimension seule"), ("extract_size_from_text", "dimension dans un texte")] %}
+            <option value="{{ value }}" {% if transforms.get("size") == value %}selected{% endif %}>{{ text }}</option>
+            {% endfor %}
+          </select>
+          {% elif field == "price_eur" %}
+          <select name="transform_price_eur">
+            {% for value, text in [("", "aucune"), ("decimal_comma", "virgule décimale"), ("cents_to_eur", "centimes en euros")] %}
+            <option value="{{ value }}" {% if transforms.get("price_eur", "") == value %}selected{% endif %}>{{ text }}</option>
+            {% endfor %}
+          </select>
+          {% endif %}
+        </td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% for field, value in unknown_values %}
+  <p class="message warning">Valeur de « {{ fields[field] }} » non reconnue : <code>{{ value }}</code>. Les lignes concernées seront rejetées ; ajoutez-la à la main dans le fichier de mapping si elle est correcte.</p>
+  {% endfor %}
+
+  <div class="buttons">
+    <button type="submit" name="action" value="check">Vérifier avec ces colonnes</button>
+    <button type="submit" name="action" value="save" class="secondary">Enregistrer le fournisseur</button>
+  </div>
+</form>
+
+<h2>3. Import à blanc</h2>
+<p class="muted">Le fichier est lu et contrôlé avec cette correspondance, sans rien écrire en base.</p>
+<div class="counters">
+  <div><span class="label">Lignes lues</span><span class="value">{{ result.rows_read }}</span></div>
+  <div><span class="label">Valides</span><span class="value">{{ result.valid }}</span></div>
+  <div><span class="label">Rejetées</span><span class="value">{{ result.rejected }}</span></div>
+  <div><span class="label">Taux de rejet</span><span class="value">{{ result.reject_pct }} %</span></div>
+</div>
+{% if result.errors %}
+<table>
+  <thead><tr><th>Règle</th><th>Détail</th></tr></thead>
+  <tbody>
+  {% for rule, details in result.errors %}
+    <tr><td><code>{{ rule }}</code></td><td class="details">{{ details }}</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% endif %}
+
+<h2>4. Fichier de mapping {% if demo or not saved %}proposé{% endif %} : <code>config/suppliers/{{ mapping.code|lower }}.toml</code></h2>
+{% if demo and save_requested %}
+<p class="message info">Mode démonstration : voici le fichier qui aurait été enregistré.</p>
+{% endif %}
+<pre class="file"><code>{{ toml }}</code></pre>
+
+<details class="sql">
+  <summary>Fiche fournisseur : <code>docs/fournisseurs/{{ mapping.code|lower }}.md</code></summary>
+  <pre class="file"><code>{{ doc }}</code></pre>
+</details>
+
+<p><a href="/nouveau-fournisseur">Recommencer avec un autre fichier</a></p>
+{% endif %}
+
+{{ sql_block(queries or []) }}
+{% endblock %}

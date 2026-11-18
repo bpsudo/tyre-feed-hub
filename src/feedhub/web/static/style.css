@@ -298,3 +298,67 @@ details.sql .values code {
     columns: 1;
   }
 }
+
+/* New supplier */
+
+.steps {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 16px;
+  margin: 16px 0;
+}
+
+.steps label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.facts {
+  padding-left: 18px;
+}
+
+tr.mapped td:first-child {
+  font-weight: 600;
+}
+
+.buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin: 16px 0;
+}
+
+button.secondary {
+  background: #fff;
+  color: var(--accent);
+}
+
+.message.info {
+  padding: 10px 14px;
+  background: #e6eef5;
+  border-left: 4px solid var(--accent);
+}
+
+.message.warning {
+  padding: 10px 14px;
+  background: #fdf0dc;
+  border-left: 4px solid var(--orange);
+}
+
+.message.success {
+  padding: 4px 14px;
+  background: #e3f2e5;
+  border-left: 4px solid var(--green);
+}
+
+pre.file {
+  overflow-x: auto;
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 12px;
+}

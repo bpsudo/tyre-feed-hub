@@ -1,11 +1,13 @@
 import re
+import tomllib
 from datetime import date, datetime, timezone
+from html import unescape
 
 import pytest
 import requests
 
 from feedhub import checks, generator
-from feedhub.db import connect, init_db
+from feedhub.db import PROJECT_ROOT, connect, init_db
 from feedhub.mapping import load_mapping
 from feedhub.pipeline import import_suppliers
 from feedhub.web.app import create_app
@@ -145,3 +147,87 @@ def test_page_without_database(tmp_path, start_server):
     status, html = get(start_server(create_app(tmp_path / "none.db")), "/")
     assert status == 503
     assert "feedhub init-db" in html
+
+
+SUD_SAMPLE = next((PROJECT_ROOT / "data" / "samples" / "sud").iterdir())
+
+
+def upload_sud(url, **fields):
+    data = {"code": "SUD", "name": "Pneus Sud Import", **fields}
+    files = {"file": (SUD_SAMPLE.name, SUD_SAMPLE.read_bytes(), "text/csv")}
+    return requests.post(url + "/nouveau-fournisseur", data=data, files=files, timeout=10)
+
+
+def hidden(html, name):
+    return re.search(rf'name="{name}" value="([^"]*)"', html).group(1)
+
+
+@pytest.fixture
+def supplier_app(db_path, tmp_path, start_server):
+    def start(demo):
+        app = create_app(db_path, demo=demo, config_dir=tmp_path / "config", docs_dir=tmp_path / "docs")
+        return start_server(app)
+
+    (tmp_path / "config").mkdir()
+    return start
+
+
+def test_new_supplier_form(url):
+    status, html = get(url, "/nouveau-fournisseur")
+    assert status == 200
+    assert 'type="file"' in html
+
+
+def test_new_supplier_proposal(supplier_app):
+    response = upload_sud(supplier_app(demo=False))
+    html = response.text
+    assert response.status_code == 200
+    assert '<option value="Désignation" selected>' in html
+    assert 'size = "extract_size_from_text"' in unescape(html)
+    assert "Taux de rejet</span><span class=\"value\">0.0 %" in html
+    assert "SELECT DISTINCT brand" in html
+
+
+def test_new_supplier_correction_and_save(supplier_app, tmp_path):
+    url = supplier_app(demo=False)
+    first = upload_sud(url).text
+    form = {
+        "content": hidden(first, "content"), "file_name": SUD_SAMPLE.name,
+        "code": "SUD", "name": "Pneus Sud Import",
+        "column_ean": "CodeBarre", "column_brand": "Fabricant", "column_size": "Désignation",
+        "column_price_eur": "PU_HT", "column_stock": "",
+        "transform_size": "extract_size_from_text", "transform_price_eur": "",
+    }
+
+    without_stock = requests.post(url + "/nouveau-fournisseur", data=form, timeout=10).text
+    assert "Champs obligatoires sans colonne : Stock." in without_stock
+    assert not (tmp_path / "config" / "sud.toml").exists()
+
+    form.update(column_stock="Qté", action="save")
+    saved = requests.post(url + "/nouveau-fournisseur", data=form, timeout=10).text
+    assert "Fournisseur enregistré" in saved
+    assert tomllib.loads((tmp_path / "config" / "sud.toml").read_text(encoding="utf-8"))["columns"]["stock"] == "Qté"
+    assert (tmp_path / "docs" / "sud.md").exists()
+
+    again = requests.post(url + "/nouveau-fournisseur", data=form, timeout=10).text
+    assert "Le code SUD est déjà utilisé." in again
+
+
+def test_demo_mode_writes_nothing(supplier_app, tmp_path):
+    response = upload_sud(supplier_app(demo=True), action="save")
+    assert "Mode démonstration" in response.text
+    assert "voici le fichier qui aurait été enregistré" in response.text
+    assert list((tmp_path / "config").iterdir()) == []
+
+
+def test_new_supplier_bad_input(supplier_app):
+    url = supplier_app(demo=False)
+    files = {"file": ("bad.xml", b"<a><b>", "text/xml")}
+    html = requests.post(url + "/nouveau-fournisseur", data={"code": "x"}, files=files, timeout=10).text
+    assert "Fichier illisible" in html
+
+    html = requests.post(url + "/nouveau-fournisseur", data={"code": "SUD"}, timeout=10).text
+    assert "Choisissez un fichier" in html
+
+    html = upload_sud(url, code="1SUD").text
+    assert "Le code doit faire 2 à 10 caractères" in html
