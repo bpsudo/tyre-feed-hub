@@ -1,0 +1,7 @@
+# Only what the image needs.
+*
+!pyproject.toml
+!src
+!sql
+!config
+**/__pycache__
