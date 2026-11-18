@@ -152,6 +152,7 @@ def create_app(db_path=db.DEFAULT_DB_PATH, thresholds=None, demo=False,
 
     @app.get("/search", response_class=HTMLResponse)
     def search(request: Request, size: str = ""):
+        oldest_allowed = checks.oldest_allowed_date(thresholds, datetime.now(timezone.utc)).isoformat()
         search_query = reports.find_query(6)
         top_query = reports.find_query(10)
         parsed = parse_size(size.strip()) if size.strip() else None
@@ -162,6 +163,9 @@ def create_app(db_path=db.DEFAULT_DB_PATH, thresholds=None, demo=False,
                 values = {"width": parsed.width, "aspect_ratio": parsed.aspect_ratio,
                           "rim_diameter": parsed.rim_diameter}
                 offers = search_query.fetch(connection, values)
+            for offer in offers:
+                # Offer of a supplier whose newest data is too old: price and stock may be wrong.
+                offer["is_stale"] = offer["data_date"] is not None and offer["data_date"] < oldest_allowed
             top_sizes = top_query.fetch(connection, {})
         return render(
             request, "search.html",

@@ -362,3 +362,12 @@ pre.file {
   border-radius: 4px;
   padding: 12px;
 }
+
+.stale {
+  color: #9a5300;
+  background: #fdf0dc;
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-size: 12px;
+  font-weight: 600;
+}

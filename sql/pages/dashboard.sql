@@ -5,7 +5,10 @@ WITH last_run AS (
     GROUP BY supplier_id
 ),
 newest_data AS (
-    SELECT supplier_id, MAX(COALESCE(feed_date, DATE(started_at))) AS newest_data
+    SELECT
+        supplier_id,
+        MAX(COALESCE(feed_date, DATE(started_at))) AS newest_data,
+        MAX(finished_at) AS last_success_at
     FROM import_runs
     WHERE status IN ('success', 'partial')
     GROUP BY supplier_id
@@ -24,8 +27,15 @@ SELECT
     r.error_message,
     n.newest_data,
     n.newest_data < :oldest_allowed_date AS is_stale,
+    -- Critical anomalies of the last import, plus FEED_STALE (not tied to an import)
+    -- while the supplier is still late.
     (SELECT COUNT(*) FROM anomalies AS a
-     WHERE a.run_id = r.id AND a.severity = 'critical') AS critical_count,
+     WHERE a.severity = 'critical'
+       AND (a.run_id = r.id
+            OR (a.rule_code = 'FEED_STALE'
+                AND a.supplier_id = s.id
+                AND a.created_at >= COALESCE(n.last_success_at, '')
+                AND (n.newest_data IS NULL OR n.newest_data < :oldest_allowed_date)))) AS critical_count,
     (SELECT COUNT(*) FROM offers AS o WHERE o.supplier_id = s.id) AS offer_count
 FROM suppliers AS s
 LEFT JOIN last_run AS lr ON lr.supplier_id = s.id

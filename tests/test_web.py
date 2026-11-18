@@ -1,6 +1,6 @@
 import re
 import tomllib
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from html import unescape
 
 import pytest
@@ -9,7 +9,7 @@ import requests
 from feedhub import checks, generator
 from feedhub.db import PROJECT_ROOT, connect, init_db
 from feedhub.mapping import load_mapping
-from feedhub.pipeline import import_suppliers
+from feedhub.pipeline import import_suppliers, save_supplier
 from feedhub.web.app import create_app
 
 SCENARIOS = ["truncated-file", "price-crash", "dirty-file", "api-down"]
@@ -231,3 +231,50 @@ def test_new_supplier_bad_input(supplier_app):
 
     html = upload_sud(url, code="1SUD").text
     assert "Le code doit faire 2 à 10 caractères" in html
+
+
+def critical_link(code, count):
+    return f'href="/anomalies?supplier={code}&amp;severity=critical">{count}</a>'
+
+
+def test_dashboard_counts_feed_stale(url):
+    status, html = get(url, "/")
+    # REIF: no critical anomaly on its last import, but its data is late (FEED_STALE).
+    assert critical_link("REIF", 1) in html
+    # NORD: ROW_COUNT_DROP and STOCK_DROP on the cut file.
+    assert critical_link("NORD", 2) in html
+
+
+def test_feed_stale_is_no_longer_counted_once_data_is_fresh(tmp_path, start_server):
+    generator.generate(tmp_path / "feeds", days=2, end_date=date.today())
+    init_db(tmp_path / "fresh.db")
+    connection = connect(tmp_path / "fresh.db")
+    mapping = load_mapping("EURO")
+    mapping["source"]["local_dir"] = str(tmp_path / "feeds" / "euro")
+    supplier_id = save_supplier(connection, mapping)
+    # An old FEED_STALE, before the supplier sent fresh data.
+    connection.execute(
+        "INSERT INTO anomalies (supplier_id, rule_code, severity, details, created_at)"
+        " VALUES (?, 'FEED_STALE', 'critical', 'newest data: never', '2026-01-01 00:00:00')",
+        (supplier_id,),
+    )
+    connection.commit()
+    import_suppliers(connection, [mapping])
+    connection.close()
+
+    status, html = get(start_server(create_app(tmp_path / "fresh.db")), "/")
+
+    assert lights(html) == {"EURO": "green"}
+    assert "critical-count" not in html
+
+
+def test_search_flags_offers_of_late_suppliers(url):
+    status, html = get(url, "/search", size="205/55 R16")
+    rows = re.findall(r"<tr>(.*?)</tr>", html, re.DOTALL)
+    reif_rows = [row for row in rows if "<td>REIF</td>" in row]
+    other_rows = [row for row in rows if "<td>NORD</td>" in row or "<td>EURO</td>" in row]
+    late_day = (date.today() - timedelta(days=2)).strftime("%d/%m")
+
+    assert reif_rows and other_rows
+    assert all(f"données du {late_day}" in row for row in reif_rows)
+    assert not any('class="stale"' in row for row in other_rows)

@@ -19,7 +19,7 @@
   <table>
     <thead>
       <tr><th>Marque</th><th>Modèle</th><th>Indices</th><th>Saison</th><th>EAN</th><th>Fournisseur</th>
-          <th class="number">Prix HT</th><th class="number">Stock</th><th class="number">Délai</th></tr>
+          <th class="number">Prix HT</th><th class="number">Stock</th><th class="number">Délai</th><th></th></tr>
     </thead>
     <tbody>
     {% for offer in offers %}
@@ -33,9 +33,12 @@
         <td class="number">{{ "%.2f"|format(offer.price_eur) }} €</td>
         <td class="number">{{ offer.stock }}</td>
         <td class="number">{% if offer.delivery_days is not none %}{{ offer.delivery_days }} j{% endif %}</td>
+        <td class="nowrap">
+          {% if offer.is_stale %}<span class="stale" title="Données du fournisseur en retard : prix et stock à vérifier">données du {{ offer.data_date[8:10] }}/{{ offer.data_date[5:7] }}</span>{% endif %}
+        </td>
       </tr>
     {% else %}
-      <tr><td colspan="9">Aucune offre en stock dans cette dimension.</td></tr>
+      <tr><td colspan="10">Aucune offre en stock dans cette dimension.</td></tr>
     {% endfor %}
     </tbody>
   </table>
